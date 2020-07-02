@@ -5,7 +5,7 @@ from django.template import loader, Context
 
 from mvc.models import User, Area, Category, Note
 from twitterDemo.settings import PAGE_SIZE, FRIEND_LIST_MAX
-from utils import function, mailer, formatter
+from utils import function, mailer, formatter, uploader
 
 
 def __check_login(_username, _password):
@@ -236,6 +236,14 @@ def signup(request):
     return HttpResponse(_output)
 
 
+def signout(request):
+    request.session['islogin'] = False
+    request.session['userid'] = -1
+    request.session['username'] = ''
+
+    return HttpResponseRedirect('/')
+
+
 def __user_id(request):
     return request.session.get('userid', -1)
 
@@ -338,7 +346,6 @@ def index_user_page(request, _username, _page_index):
     return render(request, 'index.html', _context)
 
 
-
 def index_page(request, _page_index):
     return index_user_page(request, '', _page_index)
 
@@ -368,7 +375,7 @@ def detail(request, _id):
     _template = loader.get_template('detail.html')
 
     _context = {
-        'page_title': _('%s\'s message %s') % (_note.user.realname, _id),
+        'page_title': ('%s\'s message %s') % (_note.user.realname, _id),
         'item': _note,
         'islogin': _islogin,
         'userid': __user_id(request),
@@ -399,8 +406,8 @@ def friend_remove(request, _username):
     try:
         _user = User.objects.get(id=_user_id)
     except:
-        return __result_message(request, _('Sorry'),
-                                _('This user dose not exist.'))
+        return __result_message(request, 'Sorry',
+                                'This user dose not exist.')
 
     # check friend exist
     try:
@@ -411,3 +418,194 @@ def friend_remove(request, _username):
     except:
         return __result_message(request, 'Undisposed',
                                 'He/She dose not your friend,undisposed.')
+
+
+def friend_add(request, _username):
+    # check is login
+    _islogin = __is_login(request)
+
+    if (not _islogin):
+        return HttpResponseRedirect('/signin/')
+
+    _state = {
+        "success": False,
+        "message": "",
+    }
+
+    _user_id = __user_id(request)
+    try:
+        _user = User.objects.get(id=_user_id)
+    except:
+        return __result_message(request, 'Sorry',
+                                'This user dose not exist.')
+
+    # check friend exist
+    try:
+        _friend = User.objects.get(username=_username)
+        _user.friend.add(_friend)
+        return __result_message(
+            request, 'Successed',
+            '%s and you are friend now.' % _friend.realname)
+    except:
+        return __result_message(request, 'Sorry',
+                                'This user dose not exist.')
+
+
+def detail_delete(request, _id):
+    # get user login status
+    _islogin = __is_login(request)
+
+    _note = get_object_or_404(Note, id=_id)
+
+    _message = ""
+
+    try:
+        _note.delete()
+        _message = 'Message deleted.'
+    except:
+        _message = 'Delete failed.'
+
+    return __result_message(request, 'Message %s' % _id, _message)
+
+
+def users_list(request, _page_index=1):
+    # check is login
+    _islogin = __is_login(request)
+
+    _page_title = 'Everyone'
+    _users = User.objects.order_by('-addtime')
+
+    _login_user = None
+    _login_user_friend_list = None
+    if _islogin:
+        try:
+            _login_user = User.objects.get(id=__user_id(request))
+            _login_user_friend_list = _login_user.friend.all()
+        except:
+            _login_user = None
+
+    # page bar
+    _page_bar = formatter.pagebar(request, _users, _page_index, '',
+                                  'control/userslist_pagebar.html')
+
+    # get message list
+    _offset_index = (int(_page_index) - 1) * PAGE_SIZE
+    _last_item_index = PAGE_SIZE * int(_page_index)
+
+    # get current page
+    _users = _users[_offset_index:_last_item_index]
+
+    # body content
+    _template = loader.get_template('users_list.html')
+
+    _context = {
+        'page_title': _page_title,
+        'users': _users,
+        'login_user_friend_list': _login_user_friend_list,
+        'islogin': _islogin,
+        'userid': __user_id(request),
+        'page_bar': _page_bar,
+    }
+
+    _output = _template.render(_context)
+
+    return render(request, 'users_list.html', _context)
+
+
+def users_index(request):
+    return users_list(request, 1)
+
+
+def settings(request):
+    # check is login
+    _islogin = __is_login(request)
+
+    if (not _islogin):
+        return HttpResponseRedirect('/signin/')
+
+    _user_id = __user_id(request)
+    try:
+        _user = User.objects.get(id=_user_id)
+    except:
+        return HttpResponseRedirect('/signin/')
+
+    if request.method == "POST":
+        # get post params
+        _userinfo = {
+            'realname': request.POST['realname'],
+            'url': request.POST['url'],
+            'email': request.POST['email'],
+            'face': request.FILES.get('face', None),
+            "about": request.POST['about'],
+        }
+        _is_post = True
+    else:
+        _is_post = False
+
+    _state = {'message': ''}
+
+    # save user info
+    if _is_post:
+        _user.realname = _userinfo['realname']
+        _user.url = _userinfo['url']
+        _user.email = _userinfo['email']
+        _user.about = _userinfo['about']
+        _file_obj = _userinfo['face']
+        # try:
+        if _file_obj:
+            _upload_state = uploader.upload_face(_file_obj)
+            if _upload_state['success']:
+                _user.face = _upload_state['message']
+            else:
+                return __result_message(request, 'Error',
+                                        _upload_state['message'])
+
+        _user.save(False)
+        _state['message'] = 'Successed.'
+        # except:
+        # return __result_message(request,u'错误','提交数据时出现异常，保存失败。')
+
+    # body content
+    # _template = loader.get_template('settings.html')
+    _context = {
+        'page_title': 'Profile',
+        'state': _state,
+        'islogin': _islogin,
+        'user': _user,
+    }
+    return render(request, 'settings.html', _context)
+
+
+def api_note_add(request):
+    """
+      summary:
+          api interface post message
+      params:
+          GET['uname'] Tmitter user's username
+          GET['pwd'] user's password not encoding
+          GET['msg'] message want to post
+          GET['from'] your web site name
+      author:
+          Jason Lee
+      """
+    # get querystring params
+    _username = request.GET['uname']
+    _password = function.md5_encode(request.GET['pwd'])
+    _message = request.GET['msg']
+    _from = request.GET['from']
+
+    # Get user info and check user
+    try:
+        _user = User.objects.get(username=_username, password=_password)
+    except:
+        return HttpResponse("-2")
+
+    # Get category info ,If it not exist create new
+    (_cate, _is_added_cate) = Category.objects.get_or_create(name=_from)
+
+    try:
+        _note = Note(message=_message, user=_user, category=_cate)
+        _note.save()
+        return HttpResponse("1")
+    except:
+        return HttpResponse("-1")

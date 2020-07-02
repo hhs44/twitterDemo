@@ -3,7 +3,7 @@
 {% get_available_languages as LANGUAGES %}
 {% get_current_language_bidi as LANGUAGE_BIDI %}
 <p class="message">
-    <span class="face"><img src="{{ item.user.face|face16 }}" class="face16" /></span>
+    <span class="face"><img src="{{ item.user.face }}" class="face16" /></span>
     <a href="{% url 'tmitter-mvc-views-index_user' item.user.username %}" class="name">{{ item.user.realname }}</a>
     {{ item.message|urlize|slice:":10" }}... <a class="more" href="{% url 'tmitter-mvc-views-detail' item.id %}">{% trans 'Detail' %}...</a>
 <p>
